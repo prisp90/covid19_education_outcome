@@ -1,0 +1,858 @@
+---
+# title: "Team 125 Project Progress Report"
+# author: "Team-125"
+# date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, echo = FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# This is my generic r-markdown starting point, I comment out packages not used.
+
+if (!require(data.table)) install.packages("data.table")
+# if (!require(dtplyr)) install.packages("dtplyr")
+if (!require(magrittr)) install.packages("magrittr")
+
+if (!require(knitr)) install.packages("knitr")
+if (!require(kableExtra)) install.packages("kableExtra")
+if (!require(ggplot2)) install.packages("ggplot2")
+if (!require(ggthemes)) install.packages("ggthemes")
+if (!require(ggpubr)) install.packages("ggpubr")
+if (!require(corrplot)) install.packages("corrplot")
+# if (!require(stargazer)) install.packages("stargazer")
+
+if (!require(glmnet)) install.packages("glmnet")
+# if (!require(caret)) install.packages("caret")
+# if (!require(MASS)) install.packages("MASS")
+
+```
+
+### COVID-19 & Educational Outcomes
+Team #: 125
+
+1. **Berend Dumas;** GTID# 903737105: Lead Data Science & AI at a consultancy company based in Amsterdam. BS/MS in business and informatics. Currently working on a simulation case for a public transporter in the EU. Skilled in Python, React.js, and R. Full stack data scientist
+2. [**Harry "Gill" Potter**](https://www.linkedin.com/in/gillpotter/) GTID# 903743854: 20+ years of working experience in technology development, with 15 of those years in analytics working with healthcare payers, providers, pharmaceuticals, and digital health applications.
+3. **Kristina Linn** GTID# 903841121: Product Line Manager in the semiconductor industry; BS in Applied Math with Data Science from Cal Poly. I have worked on multiple analytics projects at work as well as in school, including modeling traffic flow, modeling substance use in a small community, modeling part usage, predicting housing costs, creating GPS
+4. **Megha Joshi** GTID# 903759623: Former Senior Data Scientist at Credit Suisse working in the Regulatory Anomaly Detection group under the Investment Banking Division. Received a bachelor's degree from Carnegie Mellon University, majoring in Statistics and Machine Learning. Outside of Data Science enjoys art, hiking, going to the beach, and history.
+5. **Sang Park (Team Lead)** GTID# 903849582: Data Analyst in the semiconductor company; BA in Education at Hanyang Univ in S.Korea, AS in Computer Science at Fullerton College. I've worked on some data analytic projects, such as estimating supply/demand for tennis courts in a city and researching success factors for new films. Deeply immersed in tennis and camping. Also, I have a keen interest in History, Architecture, and 19th-century philosophy.
+
+#### Background
+\
+**Primary Research Question**: Quantify the impact on (measures of) educational outcomes controlling for socioeconomic factors, historical performance, and government restrictions.  This analysis is **NOT** analyzing governmental policy as informing morbidity or mortality outcomes; we focus on educational outcomes.
+
+**Supporting Research Questions:**
+
+1. Did COVID-19 have a disparate impact based on student grade level?
+2. How granular can we get on the impact of education?  Can we see a difference in math vs. reading? Can we see within math/reading-specific topics?
+3. Can we understand how time impacts any effect we detect on educational outcomes?
+
+##### Business Justification:
+
+This analysis has several applications.  The most obvious is to help governments and non-profits understand how COVID-19 impacted different communities.  Our analysis will examine the impact of various governmental choices, controlling for socioeconomic factors.  This would help governments and NGOs decide how best to support a community regarding educational outcomes during future pandemics.
+
+From a commercial perspective, this can also be used to identify market opportunities for new product development or applications of existing products.  Armed with this analysis, product development could design new features or products that support future classrooms with targeted interventions, keeping communities on stable footing in education.  Additionally, it can help sales teams convince organizations to adopt new products to better prepare for future pandemics.
+
+#### Data Sources
+
+We are relying on two primary data sources.  The dependent variables come from a US federal government standardized testing program, reported publicly at the state level.  Our predictors/features come from a Google data set assembled from many disparate data sources.
+
+The "Nation's Report Card" is a set of standardized tests given to public and private school students in every state.  The US federal government provides state level standardized scores for various subjects each year for 4th, 8th, and 12th grades.  For this analysis we are using the reading and math tests for grades 4 and 8.  Because of COVID, the test data is not available for 2020 and 2021.  Therefore we will be using data for 2019 (pre-COVID) and 2022 (post-COVID).
+
+The Google Data runs from 1/1/2020, slightly before the pandemic, to 9/15/2022.  It is an extensive data set that combines data sets from many public data sources across the globe and combines it with internal data from Google on search.  For this analysis we are focusing on the US data, which has a line of data for each day, for each locality across all 720+ data elements.  Those elements are pulled from a variety of sources, cleaned and aggregated into a single file.  We start with the file and winnowed down the data based on our needs.  The predictors are grouped into the following types:  
+
+| Group | Description |
+| :--- | :--- | 
+| Demographics | Various, as of 2022, population statistics |
+| Economy | Various, as of 2022, economic indicators | 
+| Epidemiology | COVID-19 cases, deaths, recoveries and tests |
+| Emergency Declarations | Government emergency declarations and mitigation policies |
+| Geography | Geographical information about the region |
+| Health | Health indicators for the region |
+| Hospitalizations | Information related to patients of COVID-19 and hospitals |
+| Mobility | Various metrics related to the movement of people |
+| Search Trends | Trends in symptom search volumes due to COVID-19 |
+| Vaccination Access | Metrics quantifying access to COVID-19 vaccination sites |
+| Vaccination search | Trends in Google searches for COVID-19 vaccination information |
+| Vaccinations | Trends in persons vaccinated and population vaccination rate regarding various Covid-19 vaccines |
+| Government response | Government interventions and their relative stringency |
+| Weather | Dated meteorological information for each region |
+| World Bank | Latest record for each indicator from WorldBank for all reporting countries
+| epidemiology by age or sex | Epidemiology and hospitalizations data stratified by age or sex |
+
+#### Building the data sources
+
+```{r "Intial load", cache=TRUE, echo = FALSE}
+full_data <- fread("../data/google_data_cleaned_state_level_w_scores.csv")
+response_data <- fread("../Data/response_data.csv")
+all_columns <- colnames(full_data)
+```
+\
+
+This will be a common theme in our report, the data work in this project was pretty extensive.  As you will see, we started with a gigantic data set from Google that was time series in nature and global in scope.  We then combined that with state/year specific measures of educational outcomes pre/post pandemic.  While the ending data set isn't huge, the amount of pre-processing was significant.  As always, the data work ends up being way more time than the modeling
+
+The raw Google data includes sources from all over the world at various levels of detail.  For this project we are focusing on the US data.  After initial cleaning of the raw data to US only, we have `r length(all_columns)` columns and `r prettyNum(full_data[, .N], big.mark = ",")` rows.  There is a mismatch between our dependent variable which is measured annually, in this case 2019 and 2022 and our predictors.  As mentioned the candidate predictors are entered every day for every geography.  There are obviously a lot of holes in that data that we needed to correct.
+
+Not surprisingly, the Google Data has very good data on search terms.  There also seem to be a lot of predictors that are all NA, as the data is really only available at the national level.  Therefore we first drop all the predictors that are just NA's.
+
+```{r "Dropping NA predictors", echo = FALSE}
+# Initialize list of variables to drop
+na_columns_to_drop <- c()
+
+#Iterate over all columns, checking to see if all values are NA
+for (i in all_columns) {
+  if ((sum(is.na(full_data[, eval(as.symbol(i))]))/49550) == 1) {
+    na_columns_to_drop <- c(na_columns_to_drop, i)
+  }
+}
+
+# Drop those columns
+full_data[, (na_columns_to_drop) := NULL]
+```
+\
+This process removed `r length(na_columns_to_drop)` columns from the full data set.  After evaluating the many search related columns, we couldn't find a business perspective to keep them.  There may be insights to be gained about how people are searching the web that could inform marketing channels for future products.
+
+```{r "Dropping Google Search Data", echo = FALSE}
+
+full_data[, which(grepl("^search", colnames(full_data))) := NULL]
+
+```
+\
+There where `r length(grep("^search", all_columns))` columns related to search that were removed (Thanks Google!).  There are also many variables that are simply state level features that are repeated every day.  These are things like state populations, sub-populations, and other state level measures.
+
+```{r "Identify fully repeating predictor sets", echo = FALSE}
+# Of state level columns repeated by day
+state_repeating_columns <- c()
+
+# Iterate over all columns, checking to see if the data is uniform for a given state.  We can test this by using standard deviation.  If it is zero for a state and zero for all states, then it is uniform by state.  The edge case to deal with is when only one state reports.  This ends up with a call to standard deviation of only one number, which returns NA.
+
+for (i in colnames(full_data)) {
+  if (!is.character(full_data[, eval(as.symbol(i))])
+      ){
+    test <- sd(full_data[, sd(eval(as.symbol(i)), na.rm = TRUE), by = state.abb]$V1, na.rm = TRUE)
+    if ( test == 0 | is.na(test)) {
+      state_repeating_columns <- c(state_repeating_columns, i)
+    }
+  }
+}
+
+```
+
+We found `r length(state_repeating_columns)` in the remaining data set that were state level repetitions.  Some of these can be just a single state reporting, for example `new_confirmed_age_0`.  Our next sieve came to understanding the missing value percentage.  Not all measures in the data set are captured for all states on all dates.
+
+```{r "Calculating missing values rates", echo = FALSE, out.width="50%"}
+
+# TODO(GPOTTER): Add mean, sd and corr to these options
+
+missing_value_rates <- data.table(feature = character()
+                                  , feature_type = character()
+                                  , na_rate = numeric()
+                                  , NaN_rate = numeric()
+                                  )
+
+for (i in colnames(full_data)) {
+ missing_value_rates <- rbind(missing_value_rates
+                              , data.frame(feature = i
+                                           , feature_type = typeof(full_data[, eval(as.symbol(i))])
+                                           , na_rate = sum(is.na(full_data[, eval(as.symbol(i))])) / 49550
+                                           , NaN_rate = sum(is.nan(full_data[, eval(as.symbol(i))])) / 49550)
+                              )
+ 
+}
+# hist(missing_value_rates[22:203, ]$na_rate
+#      , xlab = "% of values that are NA or NaN in the feature"
+#      , main = "Histogram of missing value rates for each feature"
+#      , ylab = "Count of Features"
+#      , breaks = 20)
+
+gghistogram(missing_value_rates[22:203, ]
+            , x = "na_rate"
+            , fill = "lightgray"
+            , rug = TRUE
+            , xlab = "% of values that are NA or NaN in the feature"
+            , main = "Histogram of missing value rates for each feature"
+            , ylab = "Count of Features"
+            , bins = 20
+            )
+```
+
+```{r "Candidate Feature Variables", echo = FALSE}
+
+candidate_variables <- c("state.abb"
+                         , "cumulative_confirmed"
+                         , "cumulative_deceased"
+                         , "population"
+                         , "population_male"
+                         , "population_female"
+                         , "population_age_00_09"
+                         , "population_age_10_19"
+                         , "population_age_20_29"
+                         , "population_age_30_39"
+                         , "population_age_40_49"
+                         , "school_closing"
+                         , "workplace_closing"
+                         , "cancel_public_events"
+                         , "restrictions_on_gatherings"
+                         , "public_transport_closing"
+                         , "stay_at_home_requirements"
+                         , "restrictions_on_internal_movement"
+                         , "international_travel_controls"
+                         , "income_support"
+                         , "debt_relief"
+                         , "public_information_campaigns"
+                         , "testing_policy"
+                         , "contact_tracing"
+                         , "facial_coverings"
+                         , "vaccination_policy"
+                         , "stringency_index"
+                         , "mobility_retail_and_recreation"
+                         , "mobility_grocery_and_pharmacy"
+                         , "mobility_parks"
+                         , "mobility_transit_stations"
+                         , "mobility_workplaces"
+                         , "mobility_residential"
+                         , "cumulative_hospitalized_patients"
+                         , "current_hospitalized_patients"
+                         , "current_intensive_care_patients"
+                         # Add the predictors
+                         , "reading_grade4_2019"
+                         , "reading_grade4_2022"
+                         , "reading_grade8_2019"
+                         , "reading_grade8_2022"
+                         # Now Math
+                         , "math_grade4_2019"
+                         , "math_grade4_2022"
+                         , "math_grade8_2019"
+                         , "math_grade8_2022"
+                         )
+
+fwrite(full_data[, ..candidate_variables], "../Data/candidate_data_full.csv")
+```
+
+The histogram show us that there is a barbell distribution to the missing value rates.  This is largely driven by COVID reporting starting in different states and different attitudes to reporting data by each state.  There are roughly three types of features, low or less than 15% missing values, a group clustered around 50% missing values and those above 70% missing values.  For this analysis we focus on those features with less than 15% missing values.  That leaves us with `r as.data.table(missing_value_rates[22:203])[na_rate<=.15,.N]` features to work with.  Of those remaining, there are 35 that have interpretable meanings.  
+
+For example, it is hard to build products that are responsive to the dew point, but we can gather meaning from state level policy choices or mobility.  Choices like stay at home requirements can help decide to focus on more remote learning options.  Features around mobility changes can help us understand where to target different promotions.  There are 8 population demographic measures, 16 policy measures, 6 mobility and 5 morbidity/mortality measures.
+
+The policy measures, are categorical variables with 4 levels.  A zero indicates that there was no policy in place, up to 3, indicating that the policy was strictly enforced.  The mobility measures are percentage changes in the visits to different locations (parks, transit stations, residential, etc.).  The population, morbidity and mortality measures are M/F %, infections, hospitalizations, etc.  All of these measures have some missing data, but relatively low as some states did not report at all some measures or some measures where not captured for the full time period.  We ultimately had to drop RI from the data set, as it had very incosistant reporting in the Google data set.
+
+The biggest challenge in marrying these data sets has been the change in time measures.  To better summarize the predictors, we created means over the entire time period.  Since each variable is reported each day, we can create a mean of each variable to use as a predictor.  This also helps with the scaling between the variables.  Since our dependent variable will be a "% change" we wanted to model with variables on a similar scale.
+
+In future analysis, including more details in the predictors like standard deviation, or other transformation could yield more insights.
+
+#### Dependent Analysis
+\
+The NAEP data sets represent `r full_data[, .N, by = state][, .N]` US states.  This is fewer than the number of US "states" captured by Google, we decided to drop those geographies (think Guam, D.C. or Puerto Rico).  We built dependent variables that are subject (Math or Reading), grade (4th or 9th) and year (2019 or 2022) specific by state.  From those variables we built difference measures (2022 - 2019) to test in modeling.  For each state we had reading and math scores for 4th and 8th graders for 2022 and 2019.
+
+```{r "Response Variable Building", echo = FALSE}
+
+#TODO(GPOTTER): This needs to get refactored into the data build code.
+
+response_variables <- all_columns[3:10]
+full_data[, ln_reading_grade4_2019 := log(reading_grade4_2019)]
+full_data[, ln_reading_grade4_2022 := log(reading_grade4_2022)]
+full_data[, ln_reading_grade8_2019 := log(reading_grade8_2019)]
+full_data[, ln_reading_grade8_2019 := log(reading_grade8_2022)]
+
+full_data[, ln_math_grade4_2019 := log(reading_grade4_2019)]
+full_data[, ln_math_grade4_2022 := log(reading_grade4_2022)]
+full_data[, ln_math_grade8_2019 := log(reading_grade8_2019)]
+full_data[, ln_math_grade8_2022 := log(reading_grade8_2022)]
+
+full_data[, delta_reading_grade4 := reading_grade4_2022 - reading_grade4_2019]
+full_data[, delta_reading_grade8 := reading_grade8_2022 - reading_grade8_2019]
+
+full_data[, delta_math_grade4 := math_grade4_2022 - math_grade4_2019]
+full_data[, delta_math_grade8 := reading_grade8_2022 - reading_grade8_2022]
+
+#Also to the response_data
+response_data[, ln_reading_grade4_2019 := log(reading_grade4_2019)]
+response_data[, ln_reading_grade4_2022 := log(reading_grade4_2022)]
+response_data[, ln_reading_grade8_2019 := log(reading_grade8_2019)]
+response_data[, ln_reading_grade8_2019 := log(reading_grade8_2022)]
+
+response_data[, ln_math_grade4_2019 := log(reading_grade4_2019)]
+response_data[, ln_math_grade4_2022 := log(reading_grade4_2022)]
+response_data[, ln_math_grade8_2019 := log(reading_grade8_2019)]
+response_data[, ln_math_grade8_2022 := log(reading_grade8_2022)]
+
+response_data[, delta_reading_grade4 := reading_grade4_2022 - reading_grade4_2019]
+response_data[, delta_reading_grade8 := reading_grade8_2022 - reading_grade8_2019]
+
+response_data[, delta_math_grade4 := math_grade4_2022 - math_grade4_2019]
+response_data[, delta_math_grade8 := math_grade8_2022 - math_grade8_2019]
+
+delta_response <- c("delta_reading_grade4", "delta_reading_grade8", "delta_math_grade4", "delta_math_grade8")
+```
+
+When we look at the distributions of the dependent variables, we see a negative mean difference in all measures between 2019 to 2022. 
+\
+
+```{r "Response variable summaries", echo = FALSE, warning=FALSE, out.width="50%"}
+
+# boxplot(response_data[, ..response_variables], las=1
+#         , main = "Comparing 2019 Scores to 2022 Scores for NAEP Standardized Tests"
+#         , xlab = "Subject-Grade-Year"
+#         , ylab = "Standardized score"
+#         , names = c("R-4-22"
+#                     , "R-4-19"
+#                     , "R-8-22"
+#                     , "R-8-19"
+#                     , "M-4-22"
+#                     , "M-4-19"
+#                     , "M-8-22"
+#                     , "M-8-19")
+#         )
+
+p1 <- ggboxplot(melt(response_data[, ..response_variables])
+                , x = "variable", y = "value"
+                , title = "Comparing 2019 Scores to 2022 Scores for NAEP Standardized Tests"
+                , xlab = "Subject-Grade-Year"
+                , ylab = "Standardized score"
+                # , add = "jitter"
+                , color = "black"
+                , fill = "gray"
+                )
+
+p1 + scale_x_discrete(labels = c("R-4-22"
+                    , "R-4-19"
+                    , "R-8-22"
+                    , "R-8-19"
+                    , "M-4-22"
+                    , "M-4-19"
+                    , "M-8-22"
+                    , "M-8-19")
+)
+# 
+# boxplot(response_data[, ..delta_response], las=1
+#         , main = "State Changes in Standardized Scores from 2019 to 2022"
+#         , xlab = "Subject - Grade"
+#         , ylab = "Change in score from 2019 to 2022"
+#         , names = c("Reading 4", "Reading 8", "Math 4", "Math 8"))
+
+p2 <- ggboxplot(melt(response_data[, ..delta_response])
+                , x = "variable", y = "value"
+                , title = "Delta from 2019 - 2022 NAEP Scores"
+                , xlab = "Subject Grade"
+                , ylab = "Standardized score"
+                # , add = "jitter"
+                , color = "black"
+                , fill = "gray"
+                )
+
+p2 + scale_x_discrete(labels = c("Reading 4", "Reading 8", "Math 4", "Math 8"))
+
+```
+\
+This is expected given the literature search and is in line with our initial hypothesis.
+
+
+#### Modeling
+\
+Since this is intended to be an interpretable model rather than predictive, we chose LASSO for predictor selection, using Adjusted $R^2$ to compare **between** different models.  We broke the predictors into three groups.
+
+1. Population (All of the demographic, morbidity and mortality data) 
+2. Policy (All of the policy measures captured by Google, such and masking, transportation, etc.) 
+3. Mobility (Not surprisingly all of the mobility measures from Google) 
+
+```{r "predictor build", echo = FALSE, cache = TRUE}
+
+# Read the data file from the data munging phase
+# this file contains all the day by day measures, so lets figure out how to 
+# better group this.
+
+candidate_data_v1 <- fread("../Data/candidate_data_full.csv")
+
+# Lets build diff's and diff percents
+
+candidate_data_v1[, diff_math_grade4 := math_grade4_2022 - math_grade4_2019]
+candidate_data_v1[, diff_math_grade8 := math_grade8_2022 - math_grade8_2019]
+
+candidate_data_v1[, perc_diff_math_grade4 := (math_grade4_2022 / math_grade4_2019) - 1]
+candidate_data_v1[, perc_diff_math_grade8 := (math_grade8_2022 / math_grade8_2019) - 1]
+
+candidate_data_v1[, diff_reading_grade4 := reading_grade4_2022 - reading_grade4_2019]
+candidate_data_v1[, diff_reading_grade8 := reading_grade8_2022 - reading_grade8_2019]
+
+candidate_data_v1[, perc_diff_reading_grade4 := (reading_grade4_2022 / reading_grade4_2019) - 1]
+candidate_data_v1[, perc_diff_reading_grade8 := (reading_grade8_2022 / reading_grade8_2019) - 1]
+
+# Now lets build some of the predictors, lets start with the population data
+candidate_data_v1[, perc_cumulative_confirmed := max(cumulative_confirmed, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+candidate_data_v1[, perc_cumulative_deceased := max(cumulative_deceased, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+# Oddly RI did not report data for population percentages by age or gender.  We are now going to drop RI from our data set.
+
+candidate_data_v1 <- candidate_data_v1[state.abb != 'RI', ]
+
+candidate_data_v1[, perc_population_male := max(population_male, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_female := max(population_female, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+candidate_data_v1[, perc_population_age_00_09 := max(population_age_00_09, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_10_19 := max(population_age_10_19, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_20_29 := max(population_age_20_29, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_30_39 := max(population_age_30_39, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_40_49 := max(population_age_40_49, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+# Now we are going to create average scores for rules
+
+candidate_data_v1[, mean_school_closing := mean(school_closing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_workplace_closing := mean(workplace_closing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_cancel_public_events := mean(cancel_public_events, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_restrictions_on_gatherings := mean(restrictions_on_gatherings, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_public_transport_closing := mean(public_transport_closing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_stay_at_home_requirements := mean(stay_at_home_requirements, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_restrictions_on_internal_movement := mean(restrictions_on_internal_movement, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_international_travel_controls := mean(international_travel_controls, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_income_support := mean(income_support, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_debt_relief := mean(debt_relief, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_public_information_campaigns := mean(public_information_campaigns, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_testing_policy := mean(testing_policy, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_contact_tracing := mean(contact_tracing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_facial_coverings := mean(facial_coverings, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_vaccination_policy := mean(vaccination_policy, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_stringency_index := mean(stringency_index, na.rm = TRUE), by = state.abb]
+
+#Now the mobility variables
+candidate_data_v1[, mean_retail_and_recreation := mean(mobility_retail_and_recreation, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_grocery_and_pharmacy := mean(mobility_grocery_and_pharmacy, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_parks := mean(mobility_parks, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_transit_stations := mean(mobility_transit_stations, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_workplaces := mean(mobility_workplaces, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_residential := mean(mobility_residential, na.rm = TRUE), by = state.abb]
+
+```
+
+```{r "Model data and predictor grouping", echo = FALSE, cache=TRUE}
+# OK, now that we have done the split apply combine, we need to just split, 
+# so we will take the first row of each state.  That row will have a bunch of rows
+# that are not helpful, but will also contain each measure that we created above by each state.
+
+model_test_data <- candidate_data_v1[, head(.SD, 1), by = state.abb]
+
+# Now lets create variable groups
+
+population_predictors <- c("perc_cumulative_confirmed"
+                           , "perc_cumulative_deceased"
+                           , "perc_population_male"
+                           , "perc_population_female"
+                           , "perc_population_age_00_09"
+                           , "perc_population_age_10_19"
+                           , "perc_population_age_20_29"
+                           , "perc_population_age_30_39"
+                           , "perc_population_age_40_49"
+                           )
+                           
+policy_predictors <- c("mean_school_closing"
+                       , "mean_workplace_closing"
+                       , "mean_cancel_public_events"
+                       , "mean_restrictions_on_gatherings"
+                       , "mean_public_transport_closing"
+                       , "mean_stay_at_home_requirements"
+                       , "mean_restrictions_on_internal_movement"
+                       , "mean_international_travel_controls"
+                       , "mean_income_support"
+                       , "mean_debt_relief"
+                       , "mean_public_information_campaigns"
+                       , "mean_testing_policy"
+                       , "mean_contact_tracing"
+                       , "mean_facial_coverings"
+                       , "mean_vaccination_policy"
+                       , "mean_stringency_index"
+                       )
+
+mobility_predictors <- c("mean_retail_and_recreation"
+                         ,"mean_mobility_grocery_and_pharmacy"
+                         , "mean_mobility_parks"
+                         , "mean_mobility_transit_stations"
+                         , "mean_mobility_workplaces"
+                         , "mean_mobility_residential"
+                         )
+
+mobility_policy_predictors <- c(policy_predictors
+                                , mobility_predictors)
+
+
+all_predictors <- c(population_predictors
+                    , policy_predictors
+                    , mobility_predictors
+                    )
+
+```
+
+Next we looked at correlations within each predictor group.
+\
+```{r "Correlation Checks", echo = FALSE}
+
+# corrplot(cor(model_test_data[, ..population_predictors])
+#          , method = "shade"
+#          , type = "full"
+#          , tl.col = "black"
+#          , bg = "white"
+#          , title = "Mobility Predictors"
+# 
+#          )
+# 
+# corrplot(cor(model_test_data[, ..policy_predictors])
+#          , method = "shade"
+#          , type = "full"
+#          , tl.col = "black"
+#          , bg = "white"
+#          , title = "Mobility Predictors"
+# 
+#          )
+# 
+# corrplot(cor(model_test_data[, ..mobility_predictors])
+#          , method = "shade"
+#          , type = "full"
+#          , tl.col = "black"
+#          , bg = "white"
+#          , title = "Mobility Predictors"
+#          )
+
+# God this is a pain to make pretty
+correlation_matrix <- cor(model_test_data[, ..all_predictors])
+rownames(correlation_matrix) <- c("Confirmed"
+                           , "Deceased"
+                           , "% Male"
+                           , "% Female"
+                           , "% age < 10"
+                           , "% age < 20"
+                           , "% age < 30"
+                           , "% age < 40"
+                           , "% age < 50"
+                           
+                        , "schools"
+                       , "workplace"
+                       , "public events"
+                       , "gatherings"
+                       , "transit"
+                       , "stay at home"
+                       , "internal movement"
+                       , "international movement"
+                       , "income support"
+                       , "debt relief"
+                       , "public info"
+                       , "testing"
+                       , "contact tracing"
+                       , "facial coverings"
+                       , "vaccination"
+                       , "stringincy index"
+                       
+                       , "retail"
+                         ,"grocery"
+                         , "parks"
+                         , "transit"
+                         , "workplaces"
+                         , "residential"
+)
+colnames(correlation_matrix) <- c()
+
+corrplot(correlation_matrix
+         , type = 'upper'
+         , title = 'Predictor Correlation Matrix'
+         # , tl.pos='n'
+         )
+
+# TODO (GPOTTER): Fix the column names.
+
+```
+
+There is correlation within the above listed groups, so this may impact our LASSO methodology.  LASSO will tend to reduce the impact of variables that are potentially explanatory and under represent the impact of each potential predictor.
+Future work could work to use PCA to help reduce the colinearity.  Given our data set and questions, we decided to build 4 models for each dependent variable using different groups of predictors.  We earlier grouped the predictors into Population, Policy and Mobility, to that we added "All Predictors" as a forth option.  In our modeling process, we decided to use Adjusted $R^2$ to compare between models, as LASSO would use AIC to best choose predictors within each model.  This will help adjust for models with different number of predictors.
+
+```{r "functions", echo = FALSE}
+
+unpack_coef <- function(coef){
+
+  coef_string <- as.character()
+  for (i in unlist(coef[coef[,1]!=0, 0]@Dimnames)){
+    
+    coef_string <- paste0(coef_string, i, " \n\r")
+    
+  }
+  return(coef_string)
+}
+
+########## Mobility ##########
+
+mobility_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..mobility_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..mobility_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..mobility_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+  
+  return(data.frame(predictors = "mobility_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+
+########## Policy ##########
+policy_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..policy_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..policy_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..policy_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+
+  return(data.frame(predictors = "policy_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+########## Mobility and Policy ##########
+
+mobility_policy_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..mobility_policy_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..mobility_policy_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..mobility_policy_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+
+  return(data.frame(predictors = "mobility_policy_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+########## All Predictors ##########
+
+all_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..all_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..all_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..all_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+  return(data.frame(predictors = "all_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+```
+\
+We then ran each each model for each outcome and selected those models with the highest Adjusted $R^2$.
+\
+```{r "Run a model for every combo", echo = FALSE, render='asis'}
+
+
+all_model_results <- 
+  as.data.table(
+    rbind(all_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          
+          , all_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          
+          , all_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          
+          , all_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+    )
+)
+kable(
+all_model_results[, max_adj_rsq := max(adj_rsq), by = dependent][adj_rsq == max_adj_rsq, ][, c("predictors", "dependent", "adj_rsq")]
+)
+
+```
+
+For the most part all_predictors have the best performance given adjusted $R^2$ as a measure.  The overall Adjusted $R^2$ is not large.  From there we looked at each of the best models, the different predictors and the corresponding $\beta$s.
+
+```{r "Coeffecicents for each of the best models", echo = FALSE, render='asis'}
+
+best_models <- all_model_results[, max_adj_rsq := max(adj_rsq), by = dependent][adj_rsq == max_adj_rsq, ][, c("predictors", "dependent", "adj_rsq", "best_lambda")]
+
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..mobility_predictors])
+                              , y = model_test_data[, perc_diff_math_grade4]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_math_grade4", best_lambda]
+                       )
+)
+
+kable(
+  print_coef[print_coef[,1]!=0, ]
+  , "pipe"
+  , caption = "Math Grade 4"
+  , col.names = c("Beta")
+) 
+
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_math_grade8]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_math_grade8", best_lambda]
+                       )
+)
+kable(
+  print_coef[print_coef[,1]!=0, ]
+  , "pipe"
+  , caption = "Math Grade 8 "
+  , col.names = c( "Beta")
+
+)
+
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_reading_grade4]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_reading_grade4", best_lambda]
+                       )
+)
+kable(
+  print_coef[print_coef[,1]!=0, ]
+  , "pipe"
+  , caption = "Reading Grade 4 "
+  , col.names = c("Beta")
+
+)
+
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_reading_grade8]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_reading_grade8", best_lambda]
+                       )
+)
+kable(
+  print_coef[print_coef[,1]!=0, ]
+  , "pipe"
+  , caption = "Reading Grade 8"
+  , col.names = c("Beta")
+
+)
+
+
+```
+
+These coefficients give us an interesting insight on products to create for reducing drops in test scores during a pandemic or to have on the shelf for other emergencies.  In every model, the intercept is negative.  Meaning we should expect a drop in scores in either subject or in either grade.  What was more interesting is the drop in scores for Math were tied to not being in school.  There are negative $\beta$s in both 4th and 8th grade math models in "mean mobility residential".  This indicates, more time spent at home, holding everything else constant, means lower math.  This is somewhat off set in the 8th grade model for math, if the population is generally younger (higher $\beta$ for percent of population from 0 -> 29).
+
+Reading seems to offer a somewhat different story.  Here the $\beta$s for mobility out of the house trips like parks, combined with more stringent rules was a negative to reading, but school closings oddly lead to lower loses.
+
+These models show that, while reading is impacted by school closures and more strictures, math is the area where there is opportunity for more distance learning tools.  We also see that as students get into the 8th grade, having more people closer to their age in the general population is helpful.  This points to a product possibility for infection safe activities that focus on reading.  Think of supporting library programs, drag queen story hours or specific products to help teens read at home.
+
+
+We think more complex work should be done to better understand the offsets in the United States.  This could mean more complex models that use the respondent level data or the development

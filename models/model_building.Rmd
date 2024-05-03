@@ -1,0 +1,572 @@
+---
+title: "final_model_building"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, echo = FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# This is my generic r-markdown starting point, I comment out packages not used.
+
+if (!require(data.table)) install.packages("data.table")
+# if (!require(dtplyr)) install.packages("dtplyr")
+# if (!require(magrittr)) install.packages("magrittr")
+if (!require(kableExtra)) install.packages("kableExtra")
+if (!require(ggplot2)) install.packages("ggplot2")
+if (!require(ggthemes)) install.packages("ggthemes")
+if (!require(ggpubr)) install.packages("ggpubr")
+# if (!require(MASS)) install.packages("MASS")
+if (!require(glmnet)) install.packages("glmnet")
+if (!require(corrplot)) install.packages("corrplot")
+# if (!require(FactoMineR)) install.packages("FactoMineR")
+```
+
+OK, so it looks likes we need to build some variables for models.  I think we should start with transforming the outcome variables into % changes without the log effect.  Then we need to look at different ways to understand tha daily data as a predictor.  Let's start with means and percentages.
+
+```{r "predictor build", echo = FALSE, cache = TRUE}
+
+# Read the data file from the data munging phase
+# this file contains all the day by day measures, so lets figure out how to 
+# better group this.
+
+candidate_data_v1 <- fread("../Data/candidate_data_full.csv")
+
+# Lets build diff's and diff percents
+
+candidate_data_v1[, diff_math_grade4 := math_grade4_2022 - math_grade4_2019]
+candidate_data_v1[, diff_math_grade8 := math_grade8_2022 - math_grade8_2019]
+
+candidate_data_v1[, perc_diff_math_grade4 := (math_grade4_2022 / math_grade4_2019) - 1]
+candidate_data_v1[, perc_diff_math_grade8 := (math_grade8_2022 / math_grade8_2019) - 1]
+
+candidate_data_v1[, diff_reading_grade4 := reading_grade4_2022 - reading_grade4_2019]
+candidate_data_v1[, diff_reading_grade8 := reading_grade8_2022 - reading_grade8_2019]
+
+candidate_data_v1[, perc_diff_reading_grade4 := (reading_grade4_2022 / reading_grade4_2019) - 1]
+candidate_data_v1[, perc_diff_reading_grade8 := (reading_grade8_2022 / reading_grade8_2019) - 1]
+
+# Now lets build some of the predictors, lets start with the population data
+candidate_data_v1[, perc_cumulative_confirmed := max(cumulative_confirmed, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+candidate_data_v1[, perc_cumulative_deceased := max(cumulative_deceased, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+# Oddly RI did not report data for population percentages by age or gender.  We are now going to drop RI from our data set.
+
+candidate_data_v1 <- candidate_data_v1[state.abb != 'RI', ]
+
+candidate_data_v1[, perc_population_male := max(population_male, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_female := max(population_female, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+candidate_data_v1[, perc_population_age_00_09 := max(population_age_00_09, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_10_19 := max(population_age_10_19, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_20_29 := max(population_age_20_29, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_30_39 := max(population_age_30_39, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, perc_population_age_40_49 := max(population_age_40_49, na.rm = TRUE) / max(population, na.rm = TRUE), by = state.abb]
+
+# Now we are going to create average scores for rules
+
+candidate_data_v1[, mean_school_closing := mean(school_closing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_workplace_closing := mean(workplace_closing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_cancel_public_events := mean(cancel_public_events, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_restrictions_on_gatherings := mean(restrictions_on_gatherings, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_public_transport_closing := mean(public_transport_closing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_stay_at_home_requirements := mean(stay_at_home_requirements, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_restrictions_on_internal_movement := mean(restrictions_on_internal_movement, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_international_travel_controls := mean(international_travel_controls, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_income_support := mean(income_support, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_debt_relief := mean(debt_relief, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_public_information_campaigns := mean(public_information_campaigns, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_testing_policy := mean(testing_policy, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_contact_tracing := mean(contact_tracing, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_facial_coverings := mean(facial_coverings, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_vaccination_policy := mean(vaccination_policy, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_stringency_index := mean(stringency_index, na.rm = TRUE), by = state.abb]
+
+#Now the mobility variables
+candidate_data_v1[, mean_retail_and_recreation := mean(mobility_retail_and_recreation, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_grocery_and_pharmacy := mean(mobility_grocery_and_pharmacy, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_parks := mean(mobility_parks, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_transit_stations := mean(mobility_transit_stations, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_workplaces := mean(mobility_workplaces, na.rm = TRUE), by = state.abb]
+candidate_data_v1[, mean_mobility_residential := mean(mobility_residential, na.rm = TRUE), by = state.abb]
+
+```
+
+```{r "Model data and predictor grouping", echo = FALSE, cache=TRUE}
+# OK, now that we have done the split apply combine, we need to just split, 
+# so we will take the first row of each state.  That row will have a bunch of columns
+# that are not helpful, but will also contain each measure that we created above by each state.
+
+model_test_data <- candidate_data_v1[, head(.SD, 1), by = state.abb]
+
+# Now lets create variable groups
+
+population_predictors <- c("perc_cumulative_confirmed"
+                           , "perc_cumulative_deceased"
+                           , "perc_population_male"
+                           , "perc_population_female"
+                           , "perc_population_age_00_09"
+                           , "perc_population_age_10_19"
+                           , "perc_population_age_20_29"
+                           , "perc_population_age_30_39"
+                           , "perc_population_age_40_49"
+                           )
+                           
+policy_predictors <- c("mean_school_closing"
+                       , "mean_workplace_closing"
+                       , "mean_cancel_public_events"
+                       , "mean_restrictions_on_gatherings"
+                       , "mean_public_transport_closing"
+                       , "mean_stay_at_home_requirements"
+                       , "mean_restrictions_on_internal_movement"
+                       , "mean_international_travel_controls"
+                       , "mean_income_support"
+                       , "mean_debt_relief"
+                       , "mean_public_information_campaigns"
+                       , "mean_testing_policy"
+                       , "mean_contact_tracing"
+                       , "mean_facial_coverings"
+                       , "mean_vaccination_policy"
+                       , "mean_stringency_index"
+                       )
+
+mobility_predictors <- c("mean_retail_and_recreation"
+                         ,"mean_mobility_grocery_and_pharmacy"
+                         , "mean_mobility_parks"
+                         , "mean_mobility_transit_stations"
+                         , "mean_mobility_workplaces"
+                         , "mean_mobility_residential"
+                         )
+
+mobility_policy_predictors <- c(policy_predictors
+                                , mobility_predictors)
+
+
+all_predictors <- c(population_predictors
+                    , policy_predictors
+                    , mobility_predictors
+                    )
+
+```
+
+Lets take a look at each group of variables to see if they are correlated.
+
+```{r "Correlation Checks", echo = FALSE}
+
+corrplot(cor(model_test_data[, ..population_predictors])
+         , method = "shade"
+         , type = "full"
+         , tl.col = "black"
+         , bg = "white"
+         , title = "Mobility Predictors"
+
+         )
+
+corrplot(cor(model_test_data[, ..policy_predictors])
+         , method = "shade"
+         , type = "full"
+         , tl.col = "black"
+         , bg = "white"
+         , title = "Mobility Predictors"
+
+         )
+
+corrplot(cor(model_test_data[, ..mobility_predictors])
+         , method = "shade"
+         , type = "full"
+         , tl.col = "black"
+         , bg = "white"
+         , title = "Mobility Predictors"
+         )
+
+# TODO (GPOTTER): Clean this up.
+
+```
+
+
+Well, that's good news.  While we have some strong correlation in the "Mobility" predictors, we don't in the other categories that are unexpected. Nothing seems crazy, but we may need to consider doing PCA on the mobility measures.  
+
+It feels like predicting a percent change would work best for our modeling data.  Let's start with 4th grade math!
+
+```{r "First LASSO attempt", echo = FALSE}
+
+cv_model_math_4 <- cv.glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                             , y = model_test_data[, perc_diff_math_grade4]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+best_lambda_math_4 <- cv_model_math_4$lambda.min
+
+# best_lambda_math_4
+
+plot(cv_model_math_4)
+
+best_model_math_4 <- glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                            , y = model_test_data[, perc_diff_math_grade4]
+                            , alpha = 1
+                            , lambda = best_lambda_math_4)
+coef(best_model_math_4)
+
+
+y_predicted_math_4 <- predict(best_model_math_4, s = best_lambda_math_4
+                              , newx = data.matrix(model_test_data[, ..all_predictors])
+                              )
+
+#find SST and SSE
+sst <- sum((model_test_data[, perc_diff_math_grade4] - mean(model_test_data[, perc_diff_math_grade4]))^2)
+sse <- sum((y_predicted_math_4 - model_test_data[, perc_diff_math_grade4])^2)
+
+#find R-Squared
+rsq <- 1 - sse/sst
+rsq
+```
+
+Well, that's not particularly exciting.  Lets take a look at what happens if we PCA'd the mobility measures?
+
+```{r "Gonna try doing PCA on mobility data", echo = FLASE}
+
+if (!require(FactoMineR)) install.packages("FactoMineR")
+if (!require(factoextra)) install.packages("factoextra")
+
+# OK, Let's scale the data.
+scaled_predictors <- scale(model_test_data[, ..all_predictors])
+
+scaled_predictors_corr_matrix <- cor(scaled_predictors)
+
+# It looks like only the mobility predictors are overly correlated.  With a clear negative correlation.
+
+scaled_mobility_predictors <- scale(model_test_data[, ..mobility_predictors])
+
+scaled_mobility_predictors_corr_matrix <- cor(scaled_mobility_predictors)
+
+# Lets try turning those into PCA?
+summary(princomp(scaled_mobility_predictors_corr_matrix))
+
+```
+
+So it looks like we could reduce mobility down to basically one variable.  Since the LASSO model only picks one mobility variable, not really worth the trouble.  I wonder what we could do with policy variables?
+
+```{r "Now Gonna try doing PCA on policy data", echo = FLASE}
+
+scaled_policy_predictors <- scale(model_test_data[, ..policy_predictors])
+
+scaled_policy_predictors_corr_matrix <- cor(scaled_policy_predictors)
+
+pca_policy_predictors <- princomp(scaled_policy_predictors_corr_matrix)
+
+summary(pca_policy_predictors)
+
+fviz_eig(pca_policy_predictors, addlabels = TRUE)
+
+fviz_pca_var(pca_policy_predictors, col.var = "black")
+fviz_cos2(pca_policy_predictors, choice = "var", axes = 1:2)
+fviz_pca_var(pca_policy_predictors, col.var = "cos2"
+             , gradient.cols = c("black", "orange", "green")
+             , repel = TRUE)
+```
+
+The PCA Analysis is not that interesting.  We should test different predictor sets.
+
+```{r "Lets look at mobility alone", echo = FALSE}
+cv_model_math_4 <- cv.glmnet(x = data.matrix(model_test_data[, ..mobility_predictors])
+                             , y = model_test_data[, perc_diff_math_grade4]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+best_lambda_math_4 <- cv_model_math_4$lambda.min
+
+best_lambda_math_4
+
+plot(cv_model_math_4)
+
+best_model_math_4 <- glmnet(x = data.matrix(model_test_data[, ..mobility_predictors])
+                            , y = model_test_data[, perc_diff_math_grade4]
+                            , alpha = 1
+                            , lambda = best_lambda_math_4)
+coef(best_model_math_4)
+
+
+y_predicted_math_4 <- predict(best_model_math_4, s = best_lambda_math_4
+                              , newx = data.matrix(model_test_data[, ..mobility_predictors])
+                              )
+
+#find SST and SSE
+sst <- sum((model_test_data[, perc_diff_math_grade4] - mean(model_test_data[, perc_diff_math_grade4]))^2)
+sse <- sum((y_predicted_math_4 - model_test_data[, perc_diff_math_grade4])^2)
+
+#find R-Squared
+rsq <- 1 - sse/sst
+rsq
+```
+
+OK, so we getting a much better r-squared.  Obviously we now need to run different sets of predictors through our models to see which work best for each measure.  We will start by building some functions to help run multiple models automatically.
+
+```{r "functions", echo = FALSE}
+
+unpack_coef <- function(coef){
+
+  coef_string <- as.character()
+  for (i in unlist(coef[coef[,1]!=0, 0]@Dimnames)){
+    
+    coef_string <- paste0(coef_string, i, " \n\r")
+    
+  }
+  return(coef_string)
+}
+
+########## Mobility ##########
+
+mobility_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..mobility_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..mobility_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..mobility_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+  
+  return(data.frame(predictors = "mobility_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+
+########## Policy ##########
+policy_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..policy_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..policy_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..policy_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+
+  return(data.frame(predictors = "policy_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+########## Mobility and Policy ##########
+
+mobility_policy_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..mobility_policy_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..mobility_policy_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..mobility_policy_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+
+  return(data.frame(predictors = "mobility_policy_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+########## All Predictors ##########
+
+all_lasso_build <- function(data, y = "perc_diff_math_grade4"){
+  set.seed((2023))
+  cv_model <- cv.glmnet(x = data.matrix(data[, ..all_predictors])
+                             , y = data[, eval(as.symbol(y))]
+                             , alpha = 1
+                             # Alpha = 1 for Lasso!
+                             )
+  best_lambda <- cv_model$lambda.min
+
+  best_model <- glmnet(x = data.matrix(data[, ..all_predictors])
+                            , y = data[, eval(as.symbol(y))]
+                            , alpha = 1
+                            , lambda = best_lambda
+                     )
+
+
+  # Calculate r-squared
+  
+  y_predicted <- predict(best_model, s = best_lambda
+                        , newx = data.matrix(data[, ..all_predictors])
+                              )
+
+  #find SST and SSE
+  sst <- sum((data[, eval(as.symbol(y))] - mean(data[, eval(as.symbol(y))]))^2)
+  sse <- sum((y_predicted - data[, eval(as.symbol(y))])^2)
+
+  #find R-Squared
+  rsq <- 1 - sse/sst
+  
+  adj_rsq <- 1 - (1 - rsq) * ((best_model$nobs - 1)/(best_model$nobs - best_model$df - 1))
+
+  return(data.frame(predictors = "all_predictors"
+                    , dependent = y
+                    , best_lambda = best_lambda
+                    , adj_rsq = adj_rsq
+                    # , coef = unpack_coef(coef(best_model))
+                    )
+         )
+}
+
+```
+
+Lets run each model function for each of the 4 differences and see what types of 
+
+```{r "Run a model for every combo", echo = FALSE}
+
+all_model_results <- 
+  as.data.table(
+    rbind(all_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade4")
+          
+          , all_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_math_grade8")
+          
+          , all_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade4")
+          
+          , all_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+          , mobility_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+          , mobility_policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+          , policy_lasso_build(data = model_test_data, y = "perc_diff_reading_grade8")
+    )
+)
+
+all_model_results[, max_adj_rsq := max(adj_rsq), by = dependent][adj_rsq == max_adj_rsq, ][, c("predictors", "dependent", "adj_rsq", "best_lambda")]
+
+```
+
+For the most part all_predictors have the best performance given adjusted $R^2$ as a measure.  Lets take a look at each of the best models to understand what the predictors are in each model.
+
+```{r "Coeffecicents for each of the best models", echo = FALSE}
+
+best_models <- all_model_results[, max_adj_rsq := max(adj_rsq), by = dependent][adj_rsq == max_adj_rsq, ][, c("predictors", "dependent", "adj_rsq", "best_lambda")]
+
+print("########## Math Grade 4 ##########")
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_math_grade4]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_math_grade4", best_lambda]
+                       )
+)
+
+print_coef[print_coef[,1]!=0, ]
+
+print("########## Math Grade 8 ##########")
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_math_grade8]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_math_grade4", best_lambda]
+                       )
+)
+
+print_coef[print_coef[,1]!=0, ]
+
+print("########## Reading Grade 4 ##########")
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_reading_grade4]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_math_grade4", best_lambda]
+                       )
+)
+
+print_coef[print_coef[,1]!=0, ]
+
+print("########## Reading Grade 8 ##########")
+print_coef <- 
+coef(
+  glmnet(x = data.matrix(model_test_data[, ..all_predictors])
+                              , y = model_test_data[, perc_diff_reading_grade8]
+                              , alpha = 1
+                              , lambda = best_models[dependent == "perc_diff_math_grade4", best_lambda]
+                       )
+)
+
+print_coef[print_coef[,1]!=0, ]
+
+
+```
